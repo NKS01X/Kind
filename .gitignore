@@ -1,0 +1,31 @@
+# Cargo build artifacts
+/target/
+
+# Generated dependency files
+**/*.rs.bk
+**/*.rs~ 
+
+# Executables and binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs
+*.log
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# Cygwin-specific temp files
+*.stackdump
+*.tmp
