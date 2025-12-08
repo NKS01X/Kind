@@ -1,6 +1,8 @@
 use std::cmp::max;
 
 #[derive(Clone, Debug)]
+
+
 pub struct Node {
     pub id: i32,
     pub height: i32,
@@ -91,10 +93,10 @@ impl Node {
 
         let mut v: Vec<i32> = Vec::new(); 
         if let Some(n) = node {
-            Self::inorder(&n.left);
+            v.extend(Self::inorder(&n.left));
             //print!("{} ", n.id);
             v.push(n.id);
-            Self::inorder(&n.right);
+            v.extend(Self::inorder(&n.right));
         }
         v
     }
