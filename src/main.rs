@@ -1,19 +1,12 @@
 mod avl;
 mod debug;
+pub mod server;
 
-use avl::Node;
-use debug::debug_tree;
+use std::net::SocketAddr;
 
-fn main() {
-    let mut root: Option<Box<Node>> = None;
-    root = Node::insert(root, 10);
-    root = Node::insert(root, 20);
-    root = Node::insert(root, 5);
-    root = Node::insert(root, 4);
-    root = Node::insert(root, 15);
-
-    println!("Inorder traversal:");
-    Node::inorder(&root);
-    println!("\nDebug tree:");
-    debug_tree(&root, String::from(""), true);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let addr: SocketAddr = "0.0.0.0:50051".parse()?;
+    server::run_server(addr).await?;
+    Ok(())
 }

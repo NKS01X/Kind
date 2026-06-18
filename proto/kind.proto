@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package kind;
+
+option go_package = "vortex/client";
+
+service KindService {
+  rpc Get(GetRequest) returns (Record);
+  rpc Put(PutRequest) returns (PutResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc RangeScan(RangeScanRequest) returns (RangeScanResponse);
+}
+
+message Record {
+  string key = 1;
+  bytes value = 2;
+}
+
+message GetRequest {
+  string key = 1;
+}
+
+message PutRequest {
+  string key = 1;
+  bytes value = 2;
+}
+
+message PutResponse {
+  bool success = 1;
+}
+
+message DeleteRequest {
+  string key = 1;
+}
+
+message DeleteResponse {
+  bool success = 1;
+}
+
+message RangeScanRequest {
+  string lo = 1;
+  string hi = 2;
+}
+
+message RangeScanResponse {
+  repeated Record records = 1;
+}

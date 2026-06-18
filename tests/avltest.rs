@@ -1,4 +1,5 @@
-use kind::avl::Node; 
+use kind::avl::AVLTree; 
+
 pub fn run_test() {
     test1();
     test2();
@@ -18,6 +19,7 @@ fn check_inorders(v: Vec<i32>, u: Vec<i32>) -> bool {
     }
     true
 }
+
 pub fn print_result(testnum: i8, passed: bool) {
     if passed {
         println!("\x1b[32m[✓] {} passed\x1b[0m", testnum);
@@ -28,57 +30,65 @@ pub fn print_result(testnum: i8, passed: bool) {
 
 #[test]
 fn test1() { // ll check 
-    let mut root: Option<Box<Node>> = None;
-    root = Node::insert(root, 30);
-    root = Node::insert(root, 20);
-    root = Node::insert(root, 10);
+    let mut tree = AVLTree::new();
+    tree.insert(30);
+    tree.insert(20);
+    tree.insert(10);
     
-    let output: Vec<i32> = Node::inorder(&root); 
+    let output = tree.get_inorder(); 
     let expected = vec![10, 20, 30];
-    print_result(1, check_inorders(output, expected));
+    print_result(1, check_inorders(output.clone(), expected.clone()));
+    assert_eq!(output, expected);
 }
+
 #[test]
 fn test2() { // rr check
-    let mut root: Option<Box<Node>> = None;
-    root = Node::insert(root, 10);
-    root = Node::insert(root, 20);
-    root = Node::insert(root, 30); 
+    let mut tree = AVLTree::new();
+    tree.insert(10);
+    tree.insert(20);
+    tree.insert(30); 
 
-    let output: Vec<i32> = Node::inorder(&root); 
+    let output = tree.get_inorder(); 
     let expected = vec![10, 20, 30];
-    print_result(2, check_inorders(output, expected));
+    print_result(2, check_inorders(output.clone(), expected.clone()));
+    assert_eq!(output, expected);
 }
+
 #[test]
 fn test3() { //lr check
-    let mut root: Option<Box<Node>> = None;
-    root = Node::insert(root, 30);
-    root = Node::insert(root, 10);
-    root = Node::insert(root, 20); 
+    let mut tree = AVLTree::new();
+    tree.insert(30);
+    tree.insert(10);
+    tree.insert(20); 
 
-    let output: Vec<i32> = Node::inorder(&root); 
+    let output = tree.get_inorder(); 
     let expected = vec![10, 20, 30];
-    print_result(3, check_inorders(output, expected));
+    print_result(3, check_inorders(output.clone(), expected.clone()));
+    assert_eq!(output, expected);
 }
+
 #[test]
 fn test4() { //rl check
-    let mut root: Option<Box<Node>> = None;
-    root = Node::insert(root, 10);
-    root = Node::insert(root, 30);
-    root = Node::insert(root, 20);
+    let mut tree = AVLTree::new();
+    tree.insert(10);
+    tree.insert(30);
+    tree.insert(20);
 
-    let output: Vec<i32> = Node::inorder(&root); 
+    let output = tree.get_inorder(); 
     let expected = vec![10, 20, 30];
-    print_result(4, check_inorders(output, expected));
+    print_result(4, check_inorders(output.clone(), expected.clone()));
+    assert_eq!(output, expected);
 }
+
 #[test]
 fn test5() {
-    let mut root: Option<Box<Node>> = None;
-    root = Node::insert(root, 10);
-    root = Node::insert(root, 20);
-    root = Node::insert(root, 10); // duplicate
+    let mut tree = AVLTree::new();
+    tree.insert(10);
+    tree.insert(20);
+    tree.insert(10); // duplicate
 
-    let output: Vec<i32> = Node::inorder(&root); 
+    let output = tree.get_inorder(); 
     let expected = vec![10, 20];
-    print_result(5, check_inorders(output, expected));
+    print_result(5, check_inorders(output.clone(), expected.clone()));
+    assert_eq!(output, expected);
 }
-

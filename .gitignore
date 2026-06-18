@@ -29,3 +29,7 @@ Thumbs.db
 # Cygwin-specific temp files
 *.stackdump
 *.tmp
+
+# Database Snapshots
+kind_snapshot*.json
+kind_snapshot*.json.tmp
