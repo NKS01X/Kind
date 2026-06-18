@@ -30,6 +30,10 @@ Thumbs.db
 *.stackdump
 *.tmp
 
-# Database Snapshots
+# Database Snapshots and WAL
 kind_snapshot*.json
 kind_snapshot*.json.tmp
+*.wal
+
+# Local protoc download (used for local dev builds)
+/tmp_protoc/
