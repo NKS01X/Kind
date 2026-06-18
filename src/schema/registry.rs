@@ -8,6 +8,7 @@ use super::parser::Parser;
 pub struct SchemaRegistry {
     pub types: HashMap<String, TypeDefinition>,
     pub enums: HashMap<String, EnumDefinition>,
+    pub prefix_map: HashMap<String, String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -40,6 +41,8 @@ impl SchemaRegistry {
         for node in nodes {
             match node {
                 SchemaNode::Type(t) => {
+                    let prefix = t.prefix.clone().unwrap_or_else(|| t.name.to_lowercase());
+                    self.prefix_map.insert(prefix, t.name.clone());
                     self.types.insert(t.name.clone(), t);
                 }
                 SchemaNode::Enum(e) => {
@@ -102,5 +105,21 @@ impl SchemaRegistry {
             }
         }
         Ok(())
+    }
+
+    pub fn indexed_fields_for_prefix(&self, prefix: &str) -> Option<Vec<&super::ast::FieldDefinition>> {
+        let type_name = self.prefix_map.get(prefix)?;
+        let t_def = self.types.get(type_name)?;
+        let mut indexed = Vec::new();
+        for field in &t_def.fields {
+            if field.is_indexed {
+                indexed.push(field);
+            }
+        }
+        if indexed.is_empty() {
+            None
+        } else {
+            Some(indexed)
+        }
     }
 }

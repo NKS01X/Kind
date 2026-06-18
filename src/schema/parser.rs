@@ -4,11 +4,15 @@ use super::ast::*;
 enum Token {
     Keyword(String),
     Identifier(String),
+    StringLiteral(String),
     LBrace,
     RBrace,
+    LParen,
+    RParen,
     Comma,
     Colon,
     AtIndexed,
+    AtPrefix,
 }
 
 struct Lexer<'a> {
@@ -42,6 +46,24 @@ impl<'a> Lexer<'a> {
         } else if c == '}' {
             self.pos += 1;
             Some(Token::RBrace)
+        } else if c == '(' {
+            self.pos += 1;
+            Some(Token::LParen)
+        } else if c == ')' {
+            self.pos += 1;
+            Some(Token::RParen)
+        } else if c == '"' {
+            self.pos += 1;
+            let mut end = self.pos;
+            while end < self.input.len() && self.input[end..].chars().next().unwrap() != '"' {
+                end += self.input[end..].chars().next().unwrap().len_utf8();
+            }
+            let word = &self.input[self.pos..end];
+            self.pos = end;
+            if self.pos < self.input.len() && self.input[self.pos..].chars().next() == Some('"') {
+                self.pos += 1;
+            }
+            Some(Token::StringLiteral(word.to_string()))
         } else if c == ',' {
             self.pos += 1;
             Some(Token::Comma)
@@ -57,6 +79,8 @@ impl<'a> Lexer<'a> {
             self.pos = end;
             if word == "@indexed" {
                 Some(Token::AtIndexed)
+            } else if word == "@prefix" {
+                Some(Token::AtPrefix)
             } else {
                 self.next_token()
             }
@@ -130,6 +154,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_node(&mut self) -> Result<SchemaNode, String> {
+        let mut prefix = None;
+        if self.current_token == Some(Token::AtPrefix) {
+            self.advance();
+            self.match_token(Token::LParen)?;
+            if let Some(Token::StringLiteral(s)) = &self.current_token {
+                prefix = Some(s.clone());
+                self.advance();
+            } else {
+                return Err("Expected string literal after @prefix(".to_string());
+            }
+            self.match_token(Token::RParen)?;
+        }
+
         match &self.current_token {
             Some(Token::Keyword(k)) if k == "type" => {
                 self.advance();
@@ -165,7 +202,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.match_token(Token::RBrace)?;
-                Ok(SchemaNode::Type(TypeDefinition { name, fields }))
+                Ok(SchemaNode::Type(TypeDefinition { name, fields, prefix }))
             }
             Some(Token::Keyword(k)) if k == "enum" => {
                 self.advance();

@@ -22,6 +22,7 @@ pub struct FieldDefinition {
 pub struct TypeDefinition {
     pub name: String,
     pub fields: Vec<FieldDefinition>,
+    pub prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
