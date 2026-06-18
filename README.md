@@ -1,68 +1,115 @@
-# 🌟 Kind DB
+<p align="center">
+  <img src="kind.png" alt="Kind DB Logo" width="200"/>
+</p>
 
-Welcome to **Kind DB**! 
+<h1 align="center">Kind DB</h1>
 
-If you are new here and wondering, *"What on earth is this, and why should I care?"* — you are in the right place. This guide is written so that absolutely anyone can understand what Kind DB is, how it works, and how to use it.
+<p align="center">
+  A lock-free, in-memory key-value database written in Rust, built for distributed coordination.
+</p>
 
----
-
-## 📖 What is Kind DB?
-
-Imagine you have several different apps (or servers) running at the same time, and they all need to share a common notebook to read and write information instantly. 
-- If one app writes, "User Alice just logged in," the other apps need to see it immediately. 
-- If an app crashes, you don't want to lose the notebook. 
-- If multiple apps try to write to the exact same page at the exact same millisecond, you don't want the notebook to get corrupted.
-
-**Kind DB is that super-fast, indestructible shared notebook.** 
-
-In technical terms: It is a **lightweight, purely in-memory key-value database**. It is built in **Rust** (which makes it incredibly fast and safe) and acts as a central brain for your other applications to store data, coordinate tasks, and keep track of state.
-
-### Why is it special?
-1. **Blazing Fast (In-Memory)**: Instead of saving data directly to a slow hard drive, Kind DB keeps all your data in RAM (your computer's active memory). This makes reading and writing almost instantaneous.
-2. **Never Loses Data (WAL & Snapshots)**: Even though it lives in memory, it writes a backup log (Write-Ahead Log) to your hard drive every time you make a change. If your server suddenly loses power, Kind DB simply reads this backup file when it turns back on, putting everything exactly back the way it was.
-3. **No Traffic Jams (Lock-Free)**: Traditional databases sometimes freeze when too many users try to write at once (like a traffic jam). Kind DB uses advanced "lock-free" math (a Concurrent Skip List) so millions of requests can happen simultaneously without slowing down.
-4. **Strict Rules (KSL Schema)**: You define exactly what your data should look like in a file. If an app tries to save bad data (like saving text instead of a number), Kind DB rejects it immediately.
+<p align="center">
+  <img src="https://img.shields.io/badge/Rust-1.76+-orange?style=flat-square&logo=rust"/>
+  <img src="https://img.shields.io/badge/gRPC-Tonic-blue?style=flat-square"/>
+  <img src="https://img.shields.io/docker/image-size/nks01x/kind-db/latest?style=flat-square&logo=docker&label=Docker"/>
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square"/>
+</p>
 
 ---
 
-## 🏗️ How it Works (Architecture)
+## What is Kind DB?
 
-Here is a visual map of what is happening inside Kind DB:
+Imagine you have several different apps (or servers) running at the same time, and they all need to share a common notebook to read and write information instantly.
+- If one app writes something, the other apps need to see it immediately.
+- If an app crashes, you don't want to lose the notebook.
+- If multiple apps try to write to the exact same key at the exact same millisecond, you don't want data corruption.
+
+**Kind DB is that super-fast, indestructible shared notebook.**
+
+In technical terms: It is a **lightweight, purely in-memory key-value database** built in **Rust**. It acts as a central brain for your other applications to store data, coordinate tasks, and keep track of state. It exposes a **gRPC interface** and ships with a **built-in CLI (`kindctl`)**.
+
+---
+
+## Architecture
 
 ```mermaid
 graph TD
     Client[Your App / gRPC Client] -->|Sends Data| Server[Kind DB Server]
-    Server --> Cache[Smart Cache Layer]
-    Server --> SchemaReg[Schema Police: Checks KSL file]
-    SchemaReg -->|Reads Rules| KSL[schema.ksl]
-    
-    subgraph Inside the Engine
-        Server --> SkipMap[(Main Memory Notebook)]
-        Server --> Indexes[(Quick Lookup Lists)]
+    CLI[kindctl CLI] -->|gRPC| Server
+    Server --> Cache[Cache Layer: LRU / LFU / FIFO]
+    Server --> SchemaReg[Schema Registry]
+    SchemaReg -->|Reads| KSL[schema.ksl]
+
+    subgraph Core Engine
+        Server --> SkipMap[(Lock-Free Skip List)]
+        Server --> Indexes[(Secondary Indexes)]
     end
-    
-    SkipMap -->|Saves Backup| WAL[Write-Ahead Log on Hard Drive]
-    SkipMap -->|Saves Big File| Snapshot[JSON Snapshot every 5 mins]
-    
-    subgraph Background Cleaners
-        TTLWorker[Expiration Sweeper] -.->|Deletes old data| SkipMap
-        SnapshotWorker[File Cleaner] -.->|Shrinks backup file| WAL
+
+    SkipMap -->|Appends| WAL[Write-Ahead Log]
+    SkipMap -->|Flush every 5min| Snapshot[JSON Snapshot]
+
+    subgraph Background Workers
+        TTLWorker[TTL Eviction Worker] -.->|Deletes expired keys| SkipMap
+        SnapshotWorker[Snapshot Worker] -.->|Truncates| WAL
     end
 ```
 
 ---
 
-## 🚀 Getting Started
+## Features
 
-There are two ways to run Kind DB. You can run it like a standard app on your computer, or you can run it inside **Docker** (a tool that packages the app so it runs perfectly on any machine without installing anything extra). 
+### Lock-Free Concurrent Skip List
+At its core, Kind DB uses `crossbeam-skiplist` — a completely lock-free data structure. This eliminates the global `RwLock` bottlenecks found in traditional tree-based databases. Reads and writes can happen simultaneously from millions of threads with `O(log N)` complexity.
 
-**We highly recommend using Docker.**
+### Secondary Indexing
+Fields marked with `@indexed` in your schema automatically get a secondary index. Instead of scanning the entire database, lookups like `WHERE status = Running` complete in `O(log N)` time with built-in pagination (`limit` / `offset`).
 
-### Option 1: The Easy Way (Docker)
-You don't need to install Rust or compile anything. You just need [Docker](https://docs.docker.com/get-docker/) installed.
+### TTL and Distributed Coordination
+- **Atomic CAS (Compare-and-Swap):** Guarantees linearizable state updates, perfect for distributed locks.
+- **Time-To-Live (TTL):** Set expiration on any key via `ttl_ms`. A hybrid eviction engine uses lazy purging on reads and an active background sweeper every 5 seconds.
 
-1. Create a folder on your computer and open it in your terminal.
-2. Inside that folder, create a file named `docker-compose.yml` and paste this inside:
+### Snapshot Persistence and WAL
+Every write is appended to a `.wal` file on disk. A background task flushes memory to a JSON snapshot every 5 minutes and truncates the WAL. On restart, Kind DB replays both automatically — your data is never lost.
+
+### Modular Caching
+Reads bypass the `O(log N)` traversal via a hot cache layer. Three strategies are supported:
+- **LRU — Least Recently Used** (default)
+- **LFU — Least Frequently Used**
+- **FIFO — First In, First Out**
+
+### Dynamic Schema Language (KSL)
+Kind DB uses its own **Kind Schema Language** to enforce data shape at runtime. You write a schema file, and any write that violates it is instantly rejected — no recompilation needed.
+
+```rust
+enum ContainerStatus { Running, Stopped }
+
+type ContainerRecord {
+    id: String,
+    image: String,
+    port: U16,
+    @indexed status: ContainerStatus,
+    spawn_time: I64
+}
+```
+
+---
+
+## Getting Started
+
+### Option 1: Docker (Recommended — no build tools needed)
+
+Make sure [Docker](https://docs.docker.com/get-docker/) is installed, then run:
+
+```bash
+docker run -d \
+  -p 50051:50051 \
+  -v kind-data:/app/data \
+  --name kind-db \
+  nks01x/kind-db:latest
+```
+
+Or with Docker Compose — create a `docker-compose.yml`:
+
 ```yaml
 version: '3.8'
 services:
@@ -77,172 +124,202 @@ services:
 volumes:
   kind-data:
 ```
-3. Run this command in your terminal:
+
 ```bash
 docker-compose up -d
 ```
-*Boom!* Kind DB is now running in the background on your computer (on port `50051`). It has also created a safe folder (`kind-data`) to store your backups so you never lose data.
 
-### Option 2: The Developer Way (Local Native)
-If you want to edit the database code itself, you need Rust installed.
+The DB starts on `localhost:50051`. Your data is persisted in the `kind-data` Docker volume.
+
+### Option 2: Build from Source
+
+Requires Rust 1.76+ and `protoc` v25+.
 
 ```bash
-# 1. Download the code
 git clone https://github.com/NKS01X/Kind.git
-
-# 2. Go into the folder
 cd Kind
-
-# 3. Build and Run the database
 cargo build --release
-cargo run
+
+# Start the server
+cargo run --bin kind
+
+# Use the CLI
+cargo run --bin kindctl -- --help
 ```
 
 ---
 
-## 🛠️ Step-by-Step Guide to Using Kind DB
+## kindctl — Command Line Interface
 
-Now that the database is running, how do your apps actually talk to it? Kind DB uses a communication system called **gRPC**. Think of gRPC as a universal translator that allows any programming language (Python, Go, Java, etc.) to talk to Kind DB flawlessly.
+`kindctl` is a CLI tool included in the Docker image and the binary release. It lets you interact with any running Kind DB instance directly from your terminal.
 
-### Step 1: Tell the DB what your data looks like (The Schema)
-Kind DB refuses to accept messy data. Before you start saving things, you must define the "rules" in a file called `schema.ksl`. 
+### Usage
 
-If you used Docker, this file is automatically created inside your Docker volume. If you are running locally, just create `schema.ksl` in your folder.
+```
+kindctl [OPTIONS] <COMMAND>
 
-Here is an example of a schema for user accounts:
-```rust
-// We define a list of allowed statuses
-enum Status { Active, Inactive }
+Commands:
+  put    Store a key-value pair
+  get    Retrieve the value for a key
+  del    Delete a key
+  scan   Scan all keys in an inclusive [lo, hi] range
+  query  Query records by a secondary index field
+  cas    Atomically update a key only if the current value matches expected
+  help   Print this message
 
-// We define what a User must look like
-type User {
-    id: String,           // Must be text
-    name: String,         // Must be text
-    age: U32,             // Must be a positive number
-    @indexed status: Status, // The @indexed means "let me search by this quickly later"
-    created_at: I64       // A timestamp
-}
+Options:
+  --host <HOST>   Address of the Kind DB server [default: localhost:50051]
+  -h, --help      Print help
+  -V, --version   Print version
 ```
 
-### Step 2: Connect your App to the Database
-Your app needs a "Client" to talk to the DB. You can generate a client in *any* language using the `proto/kind.proto` file. 
+### Examples
 
-Here is how you do it in **Python**:
+```bash
+# Store a record
+kindctl put user:1 '{"id":"user:1","name":"Alice","age":28,"status":"Active","created_at":0}'
 
-First, install the translator tools in your Python terminal:
+# Retrieve it
+kindctl get user:1
+
+# Store with a 10-second TTL (auto-deletes after 10s)
+kindctl put session:abc "token-xyz" --ttl 10000
+
+# Delete a key
+kindctl del user:1
+
+# Scan all keys between "user:1" and "user:9"
+kindctl scan user:1 user:9
+
+# Query by a secondary index (status must be @indexed in schema.ksl)
+kindctl query ContainerRecord status Running --limit 10 --offset 0
+
+# Atomic compare-and-swap
+kindctl cas user:1 '{"old":"value"}' '{"new":"value"}'
+
+# Connect to a remote server
+kindctl --host 192.168.1.10:50051 get user:1
+```
+
+### Using kindctl from Docker
+
+```bash
+# Use the CLI inside the running container
+docker exec -it kind-db kindctl get user:1
+
+# Or run it as a one-shot command against a remote host
+docker run --rm nks01x/kind-db:latest kindctl --host 192.168.1.10:50051 get user:1
+```
+
+---
+
+## Connecting Your App (gRPC)
+
+Kind DB uses gRPC and Protocol Buffers. Any language that supports gRPC can connect. The proto definition is at `proto/kind.proto`.
+
+### Go (Provided Client)
+
+```go
+import "github.com/NKS01X/Kind/go-client"
+
+client, err := kindclient.NewClient("localhost:50051")
+if err != nil {
+    panic(err)
+}
+defer client.Close()
+```
+
+### Python (Generated Client)
+
+Install tools:
 ```bash
 pip install grpcio grpcio-tools
 ```
 
-Next, generate the Python code from the `.proto` file (you'll need to download `proto/kind.proto` from the Github repository into your folder):
+Generate client from the proto file:
 ```bash
 python -m grpc_tools.protoc -I./proto --python_out=. --grpc_python_out=. ./proto/kind.proto
 ```
 
-Now, write your Python script to connect:
+Connect and use:
 ```python
-import grpc
-import kind_pb2
-import kind_pb2_grpc
+import grpc, kind_pb2, kind_pb2_grpc
 
-# 1. Connect to the database running on your machine
 channel = grpc.insecure_channel('localhost:50051')
 client = kind_pb2_grpc.KindServiceStub(channel)
-```
 
-### Step 3: Insert Data (`Put`)
-Let's save a user to the database! The data you send **must** perfectly match the `schema.ksl` rules you wrote earlier.
-
-```python
-import json
-
-# Create our perfect data
-my_user = {
-    "id": "user123",
-    "name": "Alice",
-    "age": 28,
-    "status": "Active",
-    "created_at": 1686000000
-}
-
-# Tell the DB: "Hey, save this in the 'User' table under the key 'user123'"
-# The 0 at the end means "never expire". If you put 5000, this user would auto-delete in 5 seconds!
-request = kind_pb2.PutRequest(
-    table="User", 
-    key="user123", 
-    value=json.dumps(my_user).encode('utf-8'), 
-    ttl_ms=0
-)
-
-client.Put(request)
-print("Alice has been saved!")
-```
-
-### Step 4: Retrieve Data (`Get`)
-Want to fetch Alice's data back out?
-
-```python
-# Just ask for "user123"
-request = kind_pb2.GetRequest(key="user123")
-response = client.Get(request)
-
-# The DB sends it back!
-print("I found:", response.value.decode('utf-8'))
-```
-
-### Step 5: Search Data (`RangeScan`)
-Remember how we put `@indexed` next to `status` in our schema? That tells Kind DB to keep a special, lightning-fast list of everyone's status. This lets you ask, *"Give me everyone who is Active."*
-
-```python
-# "Look in the 'User' table, check the 'status' index, and find 'Active' people"
-request = kind_pb2.RangeScanRequest(
-    table="User", 
-    index_field="status", 
-    index_value="Active", 
-    limit=10,  # Only give me 10 people max
-    offset=0   # Start from the beginning
-)
-
-response = client.RangeScan(request)
-
-for user in response.values:
-    print("Found an active user:", user.decode('utf-8'))
-```
-
-### Step 6: Safe Updating (`Compare-and-Swap` or `CAS`)
-Imagine two apps try to update Alice's age at the exact same time. This can corrupt data! 
-Kind DB solves this with **CAS**. It basically means: *"Update Alice's age to 29, but ONLY IF her current data is exactly what I think it is."*
-
-```python
-old_data = json.dumps(my_user).encode('utf-8')
-
-my_user["age"] = 29 # Make her older
-new_data = json.dumps(my_user).encode('utf-8')
-
-request = kind_pb2.CasRequest(
-    table="User",
-    key="user123",
-    expected_value=old_data,
-    new_value=new_data,
-    ttl_ms=0
-)
-
-response = client.Cas(request)
-
-if response.success:
-    print("Successfully updated Alice!")
-else:
-    print("Someone else updated Alice first! I need to try again.")
+response = client.Get(kind_pb2.GetRequest(key="user:1"))
+print(response.value.decode('utf-8'))
 ```
 
 ---
 
-## 🎉 Summary
+## Step-by-Step Usage Guide
 
-You did it! You now know how to:
-1. Run Kind DB using Docker.
-2. Write strict rules for your data (Schema).
-3. Connect an app to it using gRPC.
-4. Insert, Fetch, Search, and safely Update data.
+### Step 1: Define Your Schema
 
-Kind DB will handle the rest—running at lightning speed in memory, automatically expiring old data, and keeping safe backups on your hard drive so you never have to worry.
+Create or edit `schema.ksl` to define what your data looks like. If using Docker, mount the file into `/app/data/schema.ksl`.
+
+```rust
+enum Status { Active, Inactive }
+
+type User {
+    id: String,
+    name: String,
+    age: U32,
+    @indexed status: Status,
+    created_at: I64
+}
+```
+
+### Step 2: Start the Database
+
+```bash
+# Docker
+docker-compose up -d
+
+# Native
+cargo run --bin kind
+```
+
+### Step 3: Insert Data
+
+```bash
+kindctl put user:1 '{"id":"user:1","name":"Alice","age":28,"status":"Active","created_at":1686000000}'
+```
+
+The value must match your `schema.ksl` definition exactly. A wrong field type or missing field will be rejected.
+
+### Step 4: Retrieve Data
+
+```bash
+kindctl get user:1
+```
+
+Output is automatically pretty-printed if the value is JSON.
+
+### Step 5: Query by Index
+
+```bash
+kindctl query User status Active --limit 10
+```
+
+### Step 6: Safe Atomic Update (CAS)
+
+Use CAS when multiple services might update the same key simultaneously. It only writes if the current value matches what you expect:
+
+```bash
+kindctl cas user:1 \
+  '{"id":"user:1","name":"Alice","age":28,"status":"Active","created_at":1686000000}' \
+  '{"id":"user:1","name":"Alice","age":29,"status":"Active","created_at":1686000000}'
+```
+
+---
+
+## Testing
+
+```bash
+cargo test
+```
+
+Covers concurrent indexing, TTL eviction, cache capacity edge cases, and transaction atomicity.
