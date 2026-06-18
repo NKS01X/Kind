@@ -1,0 +1,9 @@
+target/
+**/*.rs.bk
+Cargo.lock
+.git/
+.gitignore
+kind.wal
+kind_snapshot.json
+*.tmp
+tmp_protoc/

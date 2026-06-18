@@ -29,3 +29,11 @@ Thumbs.db
 # Cygwin-specific temp files
 *.stackdump
 *.tmp
+
+# Database Snapshots and WAL
+kind_snapshot*.json
+kind_snapshot*.json.tmp
+*.wal
+
+# Local protoc download (used for local dev builds)
+/tmp_protoc/

@@ -1,19 +1,23 @@
-mod avl;
-mod debug;
+pub mod server;
+pub mod cache;
+pub mod schema;
+pub mod wal;
 
-use avl::Node;
-use debug::debug_tree;
+use std::net::SocketAddr;
 
-fn main() {
-    let mut root: Option<Box<Node>> = None;
-    root = Node::insert(root, 10);
-    root = Node::insert(root, 20);
-    root = Node::insert(root, 5);
-    root = Node::insert(root, 4);
-    root = Node::insert(root, 15);
-
-    println!("Inorder traversal:");
-    Node::inorder(&root);
-    println!("\nDebug tree:");
-    debug_tree(&root, String::from(""), true);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let addr: SocketAddr = "0.0.0.0:50051".parse()?;
+    
+    let snapshot_path = std::env::var("KIND_SNAPSHOT_PATH")
+        .unwrap_or_else(|_| "kind_snapshot.json".to_string());
+    
+    let schema_path = std::env::var("KIND_SCHEMA_PATH")
+        .unwrap_or_else(|_| "schema.ksl".to_string());
+        
+    let wal_path = std::env::var("KIND_WAL_PATH")
+        .unwrap_or_else(|_| "kind.wal".to_string());
+        
+    server::run_server(addr, Some(snapshot_path), Some(schema_path), Some(wal_path)).await?;
+    Ok(())
 }

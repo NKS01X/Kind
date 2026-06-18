@@ -1,0 +1,44 @@
+enum ContainerStatus {
+    Running, Unhealthy, Draining, Stopped
+}
+
+type ContainerRecord {
+    id: String,
+    image: String,
+    port: U16,
+    @indexed status: ContainerStatus,
+    spawn_time: I64,
+    request_count: U64
+}
+
+enum RoutingStrategy {
+    RoundRobin, LeastConn
+}
+
+type ClusterConfig {
+    desired_count: U32,
+    min_nodes: U32,
+    max_nodes: U32,
+    strategy: RoutingStrategy,
+    scale_up_threshold: F64,
+    scale_down_threshold: F64,
+    cooldown_secs: U64
+}
+
+enum ScalingDirection {
+    Up, Down
+}
+
+enum ScalingTrigger {
+    RequestRate, CPU, Manual
+}
+
+type ScalingEvent {
+    timestamp: I64,
+    uuid: String,
+    direction: ScalingDirection,
+    trigger: ScalingTrigger,
+    delta: I32,
+    count_before: U32,
+    count_after: U32
+}
