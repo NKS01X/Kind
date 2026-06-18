@@ -140,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let request = tonic::Request::new(RangeScanRequest {
                 lo: lo.clone(),
                 hi: hi.clone(),
+                filters: vec![],
             });
             let response = client.range_scan(request).await?;
             let records = response.into_inner().records;
