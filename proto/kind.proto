@@ -9,11 +9,14 @@ service KindService {
   rpc Put(PutRequest) returns (PutResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc RangeScan(RangeScanRequest) returns (RangeScanResponse);
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc Cas(CasRequest) returns (CasResponse);
 }
 
 message Record {
   string key = 1;
   bytes value = 2;
+  optional uint64 expires_at = 3;
 }
 
 message GetRequest {
@@ -23,6 +26,7 @@ message GetRequest {
 message PutRequest {
   string key = 1;
   bytes value = 2;
+  optional uint64 ttl_ms = 3;
 }
 
 message PutResponse {
@@ -44,4 +48,27 @@ message RangeScanRequest {
 
 message RangeScanResponse {
   repeated Record records = 1;
+}
+
+message QueryRequest {
+  string schema_type = 1;
+  string field = 2;
+  string value = 3;
+  optional uint32 limit = 4;
+  optional uint32 offset = 5;
+}
+
+message QueryResponse {
+  repeated Record records = 1;
+}
+
+message CasRequest {
+  string key = 1;
+  bytes expected_value = 2;
+  bytes new_value = 3;
+  optional uint64 ttl_ms = 4;
+}
+
+message CasResponse {
+  bool success = 1;
 }

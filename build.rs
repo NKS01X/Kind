@@ -3,6 +3,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if protoc_path.exists() {
         std::env::set_var("PROTOC", protoc_path);
     }
-    tonic_build::compile_protos("proto/kind.proto")?;
+    tonic_build::configure()
+        .protoc_arg("--experimental_allow_proto3_optional")
+        .compile(&["proto/kind.proto"], &["proto"])?;
     Ok(())
 }
