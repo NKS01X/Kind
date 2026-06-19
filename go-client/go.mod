@@ -1,4 +1,4 @@
-module vortex/client
+module github.com/NKS01X/Kind/go-client
 
 go 1.25.0
 
