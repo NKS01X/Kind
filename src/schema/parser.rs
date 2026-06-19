@@ -13,6 +13,8 @@ enum Token {
     Colon,
     AtIndexed,
     AtPrefix,
+    LBracket,
+    RBracket,
 }
 
 struct Lexer<'a> {
@@ -52,6 +54,12 @@ impl<'a> Lexer<'a> {
         } else if c == ')' {
             self.pos += 1;
             Some(Token::RParen)
+        } else if c == '[' {
+            self.pos += 1;
+            Some(Token::LBracket)
+        } else if c == ']' {
+            self.pos += 1;
+            Some(Token::RBracket)
         } else if c == '"' {
             self.pos += 1;
             let mut end = self.pos;
@@ -145,6 +153,28 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_data_type(&mut self) -> Result<DataType, String> {
+        if self.current_token == Some(Token::LBracket) {
+            self.advance();
+            let inner = self.parse_data_type()?;
+            self.match_token(Token::RBracket)?;
+            Ok(DataType::Array(Box::new(inner)))
+        } else {
+            let type_name = self.expect_identifier()?;
+            match type_name.as_str() {
+                "String" => Ok(DataType::String),
+                "U16" => Ok(DataType::U16),
+                "U32" => Ok(DataType::U32),
+                "U64" => Ok(DataType::U64),
+                "I32" => Ok(DataType::I32),
+                "I64" => Ok(DataType::I64),
+                "F64" => Ok(DataType::F64),
+                "Boolean" => Ok(DataType::Boolean),
+                other => Ok(DataType::Custom(other.to_string())),
+            }
+        }
+    }
+
     pub fn parse(&mut self) -> Result<Vec<SchemaNode>, String> {
         let mut nodes = Vec::new();
         while self.current_token.is_some() {
@@ -181,18 +211,7 @@ impl<'a> Parser<'a> {
                     }
                     let field_name = self.expect_identifier()?;
                     self.match_token(Token::Colon)?;
-                    let type_name = self.expect_identifier()?;
-                    let data_type = match type_name.as_str() {
-                        "String" => DataType::String,
-                        "U16" => DataType::U16,
-                        "U32" => DataType::U32,
-                        "U64" => DataType::U64,
-                        "I32" => DataType::I32,
-                        "I64" => DataType::I64,
-                        "F64" => DataType::F64,
-                        "Boolean" => DataType::Boolean,
-                        other => DataType::Custom(other.to_string()),
-                    };
+                    let data_type = self.parse_data_type()?;
                     fields.push(FieldDefinition { name: field_name, data_type, is_indexed });
 
                     if self.current_token == Some(Token::Comma) {

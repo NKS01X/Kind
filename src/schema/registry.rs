@@ -103,6 +103,15 @@ impl SchemaRegistry {
                     return Err(ValidationError::TypeNotFound(custom_type.clone()));
                 }
             }
+            DataType::Array(inner_type) => {
+                if let Some(arr) = val.as_array() {
+                    for (i, item) in arr.iter().enumerate() {
+                        self.validate_field(&format!("{}[{}]", field_name, i), inner_type, item)?;
+                    }
+                } else {
+                    return Err(ValidationError::InvalidType { field: field_name.to_string(), expected: "Array".to_string() });
+                }
+            }
         }
         Ok(())
     }

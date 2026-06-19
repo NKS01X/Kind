@@ -71,4 +71,50 @@ mod tests {
             Err(ValidationError::InvalidType { .. })
         ));
     }
+
+    #[test]
+    fn test_ksl_array_support() {
+        let sdl = r#"
+            type User {
+                id: String,
+                friends: [String],
+                scores: [[U32]]
+            }
+        "#;
+
+        let mut registry = SchemaRegistry::new();
+        registry.load_schema(sdl).expect("Failed to load schema");
+
+        assert!(registry.types.contains_key("User"));
+
+        // Valid JSON
+        let valid_json = json!({
+            "id": "u1",
+            "friends": ["alice", "bob"],
+            "scores": [[10, 20], [30]]
+        });
+        assert_eq!(registry.validate("User", &valid_json), Ok(()));
+
+        // Invalid inner type
+        let invalid_inner = json!({
+            "id": "u1",
+            "friends": ["alice", 123],
+            "scores": [[10, 20], [30]]
+        });
+        assert!(matches!(
+            registry.validate("User", &invalid_inner),
+            Err(ValidationError::InvalidType { .. })
+        ));
+
+        // Invalid structure (not an array)
+        let invalid_struct = json!({
+            "id": "u1",
+            "friends": "alice",
+            "scores": [[10, 20], [30]]
+        });
+        assert!(matches!(
+            registry.validate("User", &invalid_struct),
+            Err(ValidationError::InvalidType { .. })
+        ));
+    }
 }

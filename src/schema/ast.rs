@@ -9,6 +9,7 @@ pub enum DataType {
     F64,
     Boolean,
     Custom(String), // Reference to an enum or another struct
+    Array(Box<DataType>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
