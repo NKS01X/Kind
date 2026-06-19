@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 use tonic::{transport::Server, Request, Response, Status};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap};
 use std::path::Path;
 
 use crossbeam_skiplist::{SkipMap, SkipSet};

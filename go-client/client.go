@@ -2,7 +2,8 @@ package client
 
 import (
 	"context"
-	pb "vortex/client/proto"
+
+	pb "github.com/NKS01X/Kind/go-client/proto"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
