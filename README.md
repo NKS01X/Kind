@@ -5,8 +5,9 @@
 <h1 align="center">Kind DB</h1>
 
 <p align="center">
-  A lock-free, in-memory key-value database written in Rust, built for distributed coordination.
+  A high-performance in-memory key-value database in Rust, built for distributed coordination — featuring a lock-free skip list core, WAL-backed durability, and MVCC.
 </p>
+
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-1.76+-orange?style=flat-square&logo=rust"/>
