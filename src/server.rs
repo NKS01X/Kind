@@ -611,26 +611,50 @@ impl KindService for KindServerImpl {
 
         if let Some(entry) = self.tree.get(&key) {
             let rec = entry.value();
-            if is_expired(rec.expires_at) { return Ok(Response::new(CasResponse { success: false })); }
-            if rec.value == expected {
-                self.remove_record_from_index(&key, &rec.value);
-                self.index_record(&key, &new_val);
-                self.cache.invalidate(&key);
-                let new_version = self.global_version.fetch_add(1, Ordering::SeqCst) + 1;
-                if let Some(wal) = lock.as_mut() {
-                    let _ = wal.append(new_version, &WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at });
+            if is_expired(rec.expires_at) {
+                if !expected.is_empty() {
+                    return Ok(Response::new(CasResponse { success: false }));
                 }
-                let _ = self.sync_tx.send((new_version, WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at }));
-                self.tree.insert(key.clone(), DbRecord { value: new_val.clone(), expires_at, version: new_version });
-                
-                let _ = self.watch_tx.send(WatchEvent {
-                    key: key.clone(),
-                    new_value: Some(new_val),
-                    operation_type: "PUT".to_string(),
-                });
-                
-                return Ok(Response::new(CasResponse { success: true }));
+            } else {
+                if rec.value == expected {
+                    self.remove_record_from_index(&key, &rec.value);
+                    self.index_record(&key, &new_val);
+                    self.cache.invalidate(&key);
+                    let new_version = self.global_version.fetch_add(1, Ordering::SeqCst) + 1;
+                    if let Some(wal) = lock.as_mut() {
+                        let _ = wal.append(new_version, &WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at });
+                    }
+                    let _ = self.sync_tx.send((new_version, WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at }));
+                    self.tree.insert(key.clone(), DbRecord { value: new_val.clone(), expires_at, version: new_version });
+                    
+                    let _ = self.watch_tx.send(WatchEvent {
+                        key: key.clone(),
+                        new_value: Some(new_val),
+                        operation_type: "PUT".to_string(),
+                    });
+                    
+                    return Ok(Response::new(CasResponse { success: true }));
+                }
+                return Ok(Response::new(CasResponse { success: false }));
             }
+        }
+        
+        if expected.is_empty() {
+            self.index_record(&key, &new_val);
+            self.cache.invalidate(&key);
+            let new_version = self.global_version.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(wal) = lock.as_mut() {
+                let _ = wal.append(new_version, &WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at });
+            }
+            let _ = self.sync_tx.send((new_version, WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at }));
+            self.tree.insert(key.clone(), DbRecord { value: new_val.clone(), expires_at, version: new_version });
+            
+            let _ = self.watch_tx.send(WatchEvent {
+                key: key.clone(),
+                new_value: Some(new_val),
+                operation_type: "PUT".to_string(),
+            });
+            return Ok(Response::new(CasResponse { success: true }));
         }
         Ok(Response::new(CasResponse { success: false }))
     }
