@@ -69,6 +69,16 @@ Fields marked with `@indexed` in your schema automatically get a secondary index
 - **Snapshot Isolation (MVCC):** Transactions are not just "last writer wins". True Repeatable Read semantics are achieved via an optimistic global versioning scheme, automatically aborting transactions if underlying keys mutated during the read phase.
 - **Time-To-Live (TTL):** Set expiration on any key via `ttl_ms`. A hybrid eviction engine uses lazy purging on reads and an active background sweeper every 5 seconds.
 
+### Real-Time Change Data Capture (Watch API)
+A high-performance server-streaming gRPC endpoint allows clients to subscribe to a realtime stream of data mutations.
+- **Key Prefix Filtering:** Only receive `WatchEvent`s (PUT/DELETE) for specific key prefixes.
+- **Stream Resiliency:** Server gracefully handles slow consumers dropping lagged events, rather than crashing the primary gRPC connection or OOM-ing the server.
+
+### Master-Follower HA Replication
+Kind DB supports a strictly sequential replication system for High Availability. A replica daemon continuously tails the leader's Write-Ahead Log (WAL) to ingest real-time mutations.
+- **Snapshot Engine & Truncation Fallback:** The WAL is truncated every 5 minutes by the leader to save disk space. If a replica connects with an outdated `last_known_tx_id` that is older than the oldest record currently available in the leader's WAL file, the leader gracefully falls back to a Full Snapshot. It streams the entire lock-free state to the replica in chunks before seamlessly transitioning back to the real-time sequential WAL stream.
+- **Daemon Mode:** Easily spin up a read-only replica by pointing the main binary to the leader: `kind --replica-of <leader_host>:50051`. All external mutation requests sent to the replica will be safely rejected.
+
 ### Persistence, WAL & Data Integrity
 Every write is appended to a `.wal` file on disk. A background task flushes memory to a JSON snapshot every 5 minutes and truncates the WAL. On restart, Kind DB replays both automatically.
 - **CRC32 Checksums:** All WAL writes are wrapped in a `{"c": <cmd>, "k": <crc32>}` envelope. If a crash occurs mid-write, the engine detects the corruption, skips the torn write safely, and prevents data poisoning.

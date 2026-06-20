@@ -12,6 +12,8 @@ service KindService {
   rpc PrefixScan(PrefixScanRequest) returns (RangeScanResponse);
   rpc Query(QueryRequest) returns (QueryResponse);
   rpc Cas(CasRequest) returns (CasResponse);
+  rpc Watch(WatchRequest) returns (stream WatchEvent);
+  rpc Sync(SyncRequest) returns (stream SyncPayload);
 }
 
 message ScanFilter {
@@ -83,4 +85,35 @@ message CasRequest {
 
 message CasResponse {
   bool success = 1;
+}
+
+message WatchRequest {
+  optional string key_prefix = 1;
+}
+
+message WatchEvent {
+  string key = 1;
+  optional bytes new_value = 2;
+  string operation_type = 3;
+}
+
+message SyncRequest {
+  uint64 last_known_tx_id = 1;
+}
+
+message SnapshotChunk {
+  repeated Record records = 1;
+  uint64 max_tx_id = 2;
+}
+
+message WalRecord {
+  uint64 tx_id = 1;
+  bytes payload = 2; // JSON encoded WalEnvelope or WalCommand
+}
+
+message SyncPayload {
+  oneof payload {
+    SnapshotChunk snapshot = 1;
+    WalRecord wal_record = 2;
+  }
 }

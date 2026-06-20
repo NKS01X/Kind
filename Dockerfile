@@ -21,9 +21,8 @@ WORKDIR /app
 # Create a data directory for persistent volumes
 RUN mkdir -p /app/data
 
-# Copy the compiled binaries and default schema
+# Copy the compiled binary and default schema
 COPY --from=builder /usr/src/kind/target/release/kind /usr/local/bin/kind
-COPY --from=builder /usr/src/kind/target/release/kindctl /usr/local/bin/kindctl
 COPY --from=builder /usr/src/kind/schema.ksl /app/data/schema.ksl
 
 # Set environment variables to point to the data directory
@@ -31,8 +30,8 @@ ENV KIND_SNAPSHOT_PATH="/app/data/snapshot.json"
 ENV KIND_SCHEMA_PATH="/app/data/schema.ksl"
 ENV KIND_WAL_PATH="/app/data/kind.wal"
 
-# Expose the gRPC port
+# Exposing the gRPC port
 EXPOSE 50051
 
-# Run the database
+#db started ;) 
 CMD ["kind"]

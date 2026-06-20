@@ -14,6 +14,11 @@ use crate::schema::SchemaRegistry;
 use crate::wal::{Wal, WalCommand};
 use std::sync::Mutex;
 
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::StreamExt;
+
 pub mod kind_pb {
     tonic::include_proto!("kind");
 }
@@ -22,7 +27,7 @@ use kind_pb::kind_service_server::{KindService, KindServiceServer};
 use kind_pb::{
     DeleteRequest, DeleteResponse, GetRequest, PutRequest, PutResponse, RangeScanRequest,
     RangeScanResponse, Record, QueryRequest, QueryResponse, CasRequest, CasResponse,
-    PrefixScanRequest, ScanFilter,
+    PrefixScanRequest, ScanFilter, WatchRequest, WatchEvent, SyncRequest, SyncPayload, SnapshotChunk, WalRecord,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -99,10 +104,14 @@ pub struct KindServerImpl {
     pub schema_registry: Arc<RwLock<SchemaRegistry>>,
     pub wal: Arc<Mutex<Option<Wal>>>,
     pub global_version: Arc<AtomicU64>,
+    pub watch_tx: broadcast::Sender<WatchEvent>,
+    pub wal_path: Option<String>,
+    pub is_replica: bool,
+    pub sync_tx: broadcast::Sender<(u64, WalCommand)>,
 }
 
 impl KindServerImpl {
-    pub fn new(snapshot_path: Option<String>, schema_path: Option<String>, wal_path: Option<String>) -> Self {
+    pub fn new(snapshot_path: Option<String>, schema_path: Option<String>, wal_path_arg: Option<String>, is_replica: bool) -> Self {
         let tree = Arc::new(SkipMap::new());
         let indexes = Arc::new(SkipMap::new());
         let cache: Box<dyn Cache<String, Vec<u8>> + Send + Sync> = Box::new(LruCache::new(1000));
@@ -167,11 +176,12 @@ impl KindServerImpl {
             }
         }
 
-        if let Some(wal_path_str) = wal_path.as_ref() {
+        if let Some(wal_path_str) = wal_path_arg.as_ref() {
             let wal_path = Path::new(wal_path_str);
             if let Ok(commands) = Wal::read_all_commands(wal_path) {
                 let registry = schema_registry.read().unwrap();
-                for cmd in commands {
+                for (tx_id, cmd) in commands {
+                    if tx_id > 0 { max_ver = max_ver.max(tx_id); } else { max_ver += 1; }
                     match cmd {
                         WalCommand::Put { key, value, expires_at } => {
                             if !is_expired(expires_at) {
@@ -183,7 +193,6 @@ impl KindServerImpl {
                                     };
                                     index_set.value().insert(key.clone());
                                 }
-                                max_ver += 1;
                                 tree.insert(key, DbRecord { value, expires_at, version: max_ver });
                             }
                         }
@@ -197,7 +206,6 @@ impl KindServerImpl {
                                 }
                             }
                             tree.remove(&key);
-                            max_ver += 1;
                         }
                         WalCommand::TxCommit(cmds) => {
                             for subcmd in cmds {
@@ -229,18 +237,20 @@ impl KindServerImpl {
                                     _ => {}
                                 }
                             }
-                            max_ver += 1;
-                        }
+                            }
                     }
                 }
             }
         }
 
-        let wal = if let Some(path) = wal_path {
+        let wal = if let Some(path) = &wal_path_arg {
             Wal::new(path).ok()
         } else {
             None
         };
+
+        let (watch_tx, _) = broadcast::channel(1024);
+        let (sync_tx, _) = broadcast::channel(10000);
 
         Self {
             tree,
@@ -250,6 +260,10 @@ impl KindServerImpl {
             schema_registry,
             wal: Arc::new(Mutex::new(wal)),
             global_version: Arc::new(AtomicU64::new(max_ver)),
+            watch_tx,
+            wal_path: wal_path_arg,
+            is_replica,
+            sync_tx,
         }
     }
 
@@ -390,6 +404,7 @@ impl<'a> TxHandle<'a> {
     }
 
     pub fn commit(self) -> Result<(), DbError> {
+        if self.server.is_replica { return Err(DbError::CommitFailed("Node is a read-only replica".into())); }
         let mut lock = self.server.wal.lock().map_err(|_| DbError::CommitFailed("Lock poisoned".into()))?;
         
         for (k, _) in self.write_set.iter() {
@@ -411,8 +426,9 @@ impl<'a> TxHandle<'a> {
         }
 
         if let Some(wal) = lock.as_mut() {
-            let _ = wal.append(&WalCommand::TxCommit(pending));
+            let _ = wal.append(new_version, &WalCommand::TxCommit(pending.clone()));
         }
+        let _ = self.server.sync_tx.send((new_version, WalCommand::TxCommit(pending)));
 
         for (k, v) in self.write_set {
             if let Some(mut rec) = v {
@@ -422,11 +438,21 @@ impl<'a> TxHandle<'a> {
                 rec.version = new_version;
                 self.server.tree.insert(k.clone(), rec.clone());
                 self.server.index_record(&k, &rec.value);
+                let _ = self.server.watch_tx.send(WatchEvent {
+                    key: k.clone(),
+                    new_value: Some(rec.value.clone()),
+                    operation_type: "PUT".to_string(),
+                });
             } else {
                 if let Some(old) = self.server.tree.get(&k) {
                     self.server.remove_record_from_index(&k, &old.value().value);
                 }
                 self.server.tree.remove(&k);
+                let _ = self.server.watch_tx.send(WatchEvent {
+                    key: k.clone(),
+                    new_value: None,
+                    operation_type: "DELETE".to_string(),
+                });
             }
             self.server.cache.invalidate(&k);
         }
@@ -461,6 +487,7 @@ impl KindService for KindServerImpl {
     }
 
     async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
+        if self.is_replica { return Err(Status::permission_denied("Node is a read-only replica")); }
         let req = request.into_inner();
         let key = req.key.clone();
         let val = req.value.clone();
@@ -477,15 +504,23 @@ impl KindService for KindServerImpl {
         
         if let Ok(mut lock) = self.wal.lock() {
             if let Some(wal) = lock.as_mut() {
-                let _ = wal.append(&WalCommand::Put { key: key.clone(), value: val.clone(), expires_at });
+                let _ = wal.append(new_version, &WalCommand::Put { key: key.clone(), value: val.clone(), expires_at });
             }
         }
-        self.tree.insert(key, DbRecord { value: val, expires_at, version: new_version });
+        let _ = self.sync_tx.send((new_version, WalCommand::Put { key: key.clone(), value: val.clone(), expires_at }));
+        self.tree.insert(key.clone(), DbRecord { value: val.clone(), expires_at, version: new_version });
+        
+        let _ = self.watch_tx.send(WatchEvent {
+            key: key.clone(),
+            new_value: Some(val),
+            operation_type: "PUT".to_string(),
+        });
         
         Ok(Response::new(PutResponse { success: true }))
     }
 
     async fn delete(&self, request: Request<DeleteRequest>) -> Result<Response<DeleteResponse>, Status> {
+        if self.is_replica { return Err(Status::permission_denied("Node is a read-only replica")); }
         let req = request.into_inner();
         let key = req.key.clone();
         
@@ -493,13 +528,19 @@ impl KindService for KindServerImpl {
             self.remove_record_from_index(&key, &old.value().value);
             self.tree.remove(&key);
             self.cache.invalidate(&key);
-            let _ = self.global_version.fetch_add(1, Ordering::SeqCst) + 1;
+            let new_version = self.global_version.fetch_add(1, Ordering::SeqCst) + 1;
             
             if let Ok(mut lock) = self.wal.lock() {
                 if let Some(wal) = lock.as_mut() {
-                    let _ = wal.append(&WalCommand::Delete { key: key.clone() });
+                    let _ = wal.append(new_version, &WalCommand::Delete { key: key.clone() });
                 }
             }
+            let _ = self.sync_tx.send((new_version, WalCommand::Delete { key: key.clone() }));
+            let _ = self.watch_tx.send(WatchEvent {
+                key: key.clone(),
+                new_value: None,
+                operation_type: "DELETE".to_string(),
+            });
             Ok(Response::new(DeleteResponse { success: true }))
         } else {
             Ok(Response::new(DeleteResponse { success: false }))
@@ -556,6 +597,7 @@ impl KindService for KindServerImpl {
     }
 
     async fn cas(&self, request: Request<CasRequest>) -> Result<Response<CasResponse>, Status> {
+        if self.is_replica { return Err(Status::permission_denied("Node is a read-only replica")); }
         let req = request.into_inner();
         let key = req.key;
         let expected = req.expected_value;
@@ -573,21 +615,170 @@ impl KindService for KindServerImpl {
             if rec.value == expected {
                 self.remove_record_from_index(&key, &rec.value);
                 self.index_record(&key, &new_val);
-                if let Some(wal) = lock.as_mut() {
-                    let _ = wal.append(&WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at });
-                }
                 self.cache.invalidate(&key);
                 let new_version = self.global_version.fetch_add(1, Ordering::SeqCst) + 1;
-                self.tree.insert(key, DbRecord { value: new_val, expires_at, version: new_version });
+                if let Some(wal) = lock.as_mut() {
+                    let _ = wal.append(new_version, &WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at });
+                }
+                let _ = self.sync_tx.send((new_version, WalCommand::Put { key: key.clone(), value: new_val.clone(), expires_at }));
+                self.tree.insert(key.clone(), DbRecord { value: new_val.clone(), expires_at, version: new_version });
+                
+                let _ = self.watch_tx.send(WatchEvent {
+                    key: key.clone(),
+                    new_value: Some(new_val),
+                    operation_type: "PUT".to_string(),
+                });
+                
                 return Ok(Response::new(CasResponse { success: true }));
             }
         }
         Ok(Response::new(CasResponse { success: false }))
     }
+
+    type WatchStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<WatchEvent, Status>> + Send + 'static>>;
+
+    async fn watch(&self, request: Request<WatchRequest>) -> Result<Response<Self::WatchStream>, Status> {
+        let req = request.into_inner();
+        let prefix = req.key_prefix.unwrap_or_default();
+        
+        let rx = self.watch_tx.subscribe();
+        let stream = BroadcastStream::new(rx)
+            .filter_map(move |res| {
+                match res {
+                    Ok(event) => {
+                        if event.key.starts_with(&prefix) {
+                            Some(Ok(event))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(BroadcastStreamRecvError::Lagged(_)) => {
+                        None
+                    }
+                }
+            });
+
+        Ok(Response::new(Box::pin(stream) as Self::WatchStream))
+    }
+
+    type SyncStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<SyncPayload, Status>> + Send + 'static>>;
+
+    async fn sync(&self, request: Request<SyncRequest>) -> Result<Response<Self::SyncStream>, Status> {
+        let req = request.into_inner();
+        let last_known_tx_id = req.last_known_tx_id;
+        
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let server = self.clone();
+        
+        tokio::spawn(async move {
+            let mut wal_records = Vec::new();
+            let mut require_snapshot = false;
+            
+            if last_known_tx_id == 0 {
+                require_snapshot = true;
+            } else if let Some(wal_path) = &server.wal_path {
+                if let Ok(records) = crate::wal::Wal::read_from_tx_id(wal_path, last_known_tx_id + 1) {
+                    if records.is_empty() {
+                        let max_tx_id = server.global_version.load(Ordering::SeqCst);
+                        if max_tx_id > last_known_tx_id {
+                            require_snapshot = true;
+                        }
+                    } else {
+                        let first_tx = records[0].0;
+                        if first_tx > last_known_tx_id + 1 {
+                            require_snapshot = true;
+                        } else {
+                            wal_records = records;
+                        }
+                    }
+                } else {
+                    require_snapshot = true;
+                }
+            } else {
+                require_snapshot = true;
+            }
+
+            let mut start_streaming_tx_id = last_known_tx_id;
+
+            if require_snapshot {
+                let max_tx_id = server.global_version.load(Ordering::SeqCst);
+                start_streaming_tx_id = max_tx_id;
+                let mut chunk = Vec::new();
+                for entry in server.tree.iter() {
+                    let rec = entry.value();
+                    if !is_expired(rec.expires_at) {
+                        chunk.push(Record {
+                            key: entry.key().clone(),
+                            value: rec.value.clone(),
+                            expires_at: rec.expires_at,
+                        });
+                        
+                        if chunk.len() >= 100 {
+                            if tx.send(Ok(SyncPayload {
+                                payload: Some(kind_pb::sync_payload::Payload::Snapshot(SnapshotChunk {
+                                    records: chunk.clone(),
+                                    max_tx_id,
+                                }))
+                            })).await.is_err() {
+                                return;
+                            }
+                            chunk.clear();
+                        }
+                    }
+                }
+                if !chunk.is_empty() || max_tx_id == 0 {
+                    if tx.send(Ok(SyncPayload {
+                        payload: Some(kind_pb::sync_payload::Payload::Snapshot(SnapshotChunk {
+                            records: chunk,
+                            max_tx_id,
+                        }))
+                    })).await.is_err() {
+                        return;
+                    }
+                }
+            } else {
+                for (tx_id, json_str) in wal_records {
+                    start_streaming_tx_id = tx_id;
+                    if tx.send(Ok(SyncPayload {
+                        payload: Some(kind_pb::sync_payload::Payload::WalRecord(WalRecord {
+                            tx_id,
+                            payload: json_str.into_bytes(),
+                        }))
+                    })).await.is_err() {
+                        return;
+                    }
+                }
+            }
+            
+            let mut rx_broadcast = server.sync_tx.subscribe();
+            while let Ok((tx_id, cmd)) = rx_broadcast.recv().await {
+                if tx_id <= start_streaming_tx_id {
+                    continue;
+                }
+                let envelope = crate::wal::WalEnvelope {
+                    c: cmd,
+                    k: 0,
+                    tx_id,
+                };
+                let mut json = serde_json::to_string(&envelope).unwrap();
+                json.push('\n');
+                if tx.send(Ok(SyncPayload {
+                    payload: Some(kind_pb::sync_payload::Payload::WalRecord(WalRecord {
+                        tx_id,
+                        payload: json.into_bytes(),
+                    }))
+                })).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        Ok(Response::new(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)) as Self::SyncStream))
+    }
 }
 
-pub async fn run_server(addr: std::net::SocketAddr, snapshot_path: Option<String>, schema_path: Option<String>, wal_path: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let server = Arc::new(KindServerImpl::new(snapshot_path, schema_path, wal_path));
+pub async fn run_server(addr: std::net::SocketAddr, snapshot_path: Option<String>, schema_path: Option<String>, wal_path: Option<String>, is_replica: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let server = Arc::new(KindServerImpl::new(snapshot_path, schema_path, wal_path, is_replica));
     
     // Background Snapshot & WAL Truncation
     let server_clone = server.clone();
@@ -619,6 +810,15 @@ pub async fn run_server(addr: std::net::SocketAddr, snapshot_path: Option<String
         }
     });
 
+    if is_replica {
+        if let Ok(leader_addr) = std::env::var("KIND_REPLICA_OF") {
+            let server_clone = server.clone();
+            tokio::spawn(async move {
+                crate::replica::run_replica_loop(server_clone, leader_addr).await;
+            });
+        }
+    }
+
     println!("Kind DB listening on {}", addr);
     
     Server::builder()
@@ -637,7 +837,7 @@ mod tests {
 
     #[test]
     fn test_transaction() {
-        let server = crate::server::KindServerImpl::new(None, None, None);
+        let server = crate::server::KindServerImpl::new(None, None, None, false);
         
         {
             let mut tx = server.begin_transaction();
@@ -658,7 +858,7 @@ mod tests {
 
     #[test]
     fn test_range_and_prefix_scan() {
-        let server = crate::server::KindServerImpl::new(None, None, None);
+        let server = crate::server::KindServerImpl::new(None, None, None, false);
         
         {
             let mut tx = server.begin_transaction();
@@ -717,7 +917,7 @@ mod tests {
         "#;
         temp_ksl.write_all(ksl_content.as_bytes()).unwrap();
 
-        let server = crate::server::KindServerImpl::new(None, Some(temp_ksl.path().to_str().unwrap().to_string()), None);
+        let server = crate::server::KindServerImpl::new(None, Some(temp_ksl.path().to_str().unwrap().to_string()), None, false);
         
         let c1 = json!({ "id": "1", "image": "nginx", "port": 80, "status": "Running", "spawn_time": 100 });
         let c2 = json!({ "id": "2", "image": "redis", "port": 6379, "status": "Stopped", "spawn_time": 101 });
@@ -745,7 +945,7 @@ mod tests {
 
     #[test]
     fn test_ttl_eviction() {
-        let server = crate::server::KindServerImpl::new(None, None, None);
+        let server = crate::server::KindServerImpl::new(None, None, None, false);
         
         {
             let mut tx = server.begin_transaction();

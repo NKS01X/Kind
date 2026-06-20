@@ -15,6 +15,8 @@ pub enum WalCommand {
 pub struct WalEnvelope {
     pub c: WalCommand,
     pub k: u32,
+    #[serde(default)]
+    pub tx_id: u64,
 }
 
 pub struct Wal {
@@ -31,7 +33,7 @@ impl Wal {
         Ok(Self { file })
     }
 
-    pub fn append(&mut self, command: &WalCommand) -> std::io::Result<()> {
+    pub fn append(&mut self, tx_id: u64, command: &WalCommand) -> std::io::Result<()> {
         let json_cmd = serde_json::to_string(command)?;
         let mut hasher = Hasher::new();
         hasher.update(json_cmd.as_bytes());
@@ -40,6 +42,7 @@ impl Wal {
         let envelope = WalEnvelope {
             c: command.clone(),
             k: crc,
+            tx_id,
         };
         let mut json = serde_json::to_string(&envelope)?;
         json.push('\n');
@@ -53,7 +56,7 @@ impl Wal {
         Ok(())
     }
 
-    pub fn read_all_commands<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<WalCommand>> {
+    pub fn read_all_commands<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<(u64, WalCommand)>> {
         if !path.as_ref().exists() {
             return Ok(Vec::new());
         }
@@ -74,18 +77,49 @@ impl Wal {
                 let crc = hasher.finalize();
                 
                 if crc == envelope.k {
-                    commands.push(envelope.c);
+                    commands.push((envelope.tx_id, envelope.c));
                 } else {
                     println!("[WAL CORRUPT] CRC32 mismatch, skipping entry");
                 }
             } else if let Ok(cmd) = serde_json::from_str::<WalCommand>(&line) {
                 println!("[WAL WARNING] Found old-format WAL entry without checksum");
-                commands.push(cmd);
+                commands.push((0, cmd));
             } else {
                 println!("[WAL CORRUPT] Failed to parse WAL entry, skipping");
             }
         }
         
         Ok(commands)
+    }
+
+    pub fn read_from_tx_id<P: AsRef<Path>>(path: P, start_tx_id: u64) -> std::io::Result<Vec<(u64, String)>> {
+        if !path.as_ref().exists() {
+            return Ok(Vec::new());
+        }
+        
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut results = Vec::new();
+        
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(envelope) = serde_json::from_str::<WalEnvelope>(&line) {
+                if envelope.tx_id >= start_tx_id {
+                    let json_cmd = serde_json::to_string(&envelope.c).unwrap_or_default();
+                    let mut hasher = Hasher::new();
+                    hasher.update(json_cmd.as_bytes());
+                    let crc = hasher.finalize();
+                    
+                    if crc == envelope.k {
+                        results.push((envelope.tx_id, line));
+                    }
+                }
+            }
+        }
+        
+        Ok(results)
     }
 }
