@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 
 	pb "github.com/NKS01X/Kind/go-client/proto"
 
@@ -68,6 +69,50 @@ func (c *KindClient) RangeScan(ctx context.Context, lo string, hi string) ([]*pb
 		Hi: hi,
 	}
 	res, err := c.client.RangeScan(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res.Records, nil
+}
+
+// Watch starts a watch on the given key prefix.
+func (c *KindClient) Watch(ctx context.Context, keyPrefix string) (pb.KindService_WatchClient, error) {
+	req := &pb.WatchRequest{}
+	if keyPrefix != "" {
+		req.KeyPrefix = &keyPrefix
+	}
+	return c.client.Watch(ctx, req)
+}
+
+// CAS (Compare-And-Swap) updates a record only if the expected value matches the current value.
+func (c *KindClient) CAS(ctx context.Context, key string, expectedValue []byte, newValue []byte, ttlMs uint64) (bool, error) {
+	req := &pb.CasRequest{
+		Key:           key,
+		ExpectedValue: expectedValue,
+		NewValue:      newValue,
+	}
+	if ttlMs > 0 {
+		req.TtlMs = &ttlMs
+	}
+	res, err := c.client.Cas(ctx, req)
+	if err != nil {
+		return false, err
+	}
+	return res.Success, nil
+}
+
+// Query retrieves records based on a schema type and a set of filters.
+func (c *KindClient) Query(ctx context.Context, schemaType string, filters map[string]interface{}) ([]*pb.Record, error) {
+	req := &pb.QueryRequest{
+		SchemaType: schemaType,
+	}
+	// The current proto definition supports a single field/value query.
+	for k, v := range filters {
+		req.Field = k
+		req.Value = fmt.Sprintf("%v", v)
+		break
+	}
+	res, err := c.client.Query(ctx, req)
 	if err != nil {
 		return nil, err
 	}

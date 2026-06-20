@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v4.25.1
-// source: proto/kind.proto
+// source: kind.proto
 
 package client
 
@@ -19,10 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KindService_Get_FullMethodName       = "/kind.KindService/Get"
-	KindService_Put_FullMethodName       = "/kind.KindService/Put"
-	KindService_Delete_FullMethodName    = "/kind.KindService/Delete"
-	KindService_RangeScan_FullMethodName = "/kind.KindService/RangeScan"
+	KindService_Get_FullMethodName        = "/kind.KindService/Get"
+	KindService_Put_FullMethodName        = "/kind.KindService/Put"
+	KindService_Delete_FullMethodName     = "/kind.KindService/Delete"
+	KindService_RangeScan_FullMethodName  = "/kind.KindService/RangeScan"
+	KindService_PrefixScan_FullMethodName = "/kind.KindService/PrefixScan"
+	KindService_Query_FullMethodName      = "/kind.KindService/Query"
+	KindService_Cas_FullMethodName        = "/kind.KindService/Cas"
+	KindService_Watch_FullMethodName      = "/kind.KindService/Watch"
+	KindService_Sync_FullMethodName       = "/kind.KindService/Sync"
 )
 
 // KindServiceClient is the client API for KindService service.
@@ -33,6 +38,11 @@ type KindServiceClient interface {
 	Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 	RangeScan(ctx context.Context, in *RangeScanRequest, opts ...grpc.CallOption) (*RangeScanResponse, error)
+	PrefixScan(ctx context.Context, in *PrefixScanRequest, opts ...grpc.CallOption) (*RangeScanResponse, error)
+	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
+	Cas(ctx context.Context, in *CasRequest, opts ...grpc.CallOption) (*CasResponse, error)
+	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchEvent], error)
+	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncPayload], error)
 }
 
 type kindServiceClient struct {
@@ -83,6 +93,74 @@ func (c *kindServiceClient) RangeScan(ctx context.Context, in *RangeScanRequest,
 	return out, nil
 }
 
+func (c *kindServiceClient) PrefixScan(ctx context.Context, in *PrefixScanRequest, opts ...grpc.CallOption) (*RangeScanResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RangeScanResponse)
+	err := c.cc.Invoke(ctx, KindService_PrefixScan_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kindServiceClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryResponse)
+	err := c.cc.Invoke(ctx, KindService_Query_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kindServiceClient) Cas(ctx context.Context, in *CasRequest, opts ...grpc.CallOption) (*CasResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CasResponse)
+	err := c.cc.Invoke(ctx, KindService_Cas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kindServiceClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &KindService_ServiceDesc.Streams[0], KindService_Watch_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchRequest, WatchEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KindService_WatchClient = grpc.ServerStreamingClient[WatchEvent]
+
+func (c *kindServiceClient) Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncPayload], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &KindService_ServiceDesc.Streams[1], KindService_Sync_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SyncRequest, SyncPayload]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KindService_SyncClient = grpc.ServerStreamingClient[SyncPayload]
+
 // KindServiceServer is the server API for KindService service.
 // All implementations must embed UnimplementedKindServiceServer
 // for forward compatibility.
@@ -91,6 +169,11 @@ type KindServiceServer interface {
 	Put(context.Context, *PutRequest) (*PutResponse, error)
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	RangeScan(context.Context, *RangeScanRequest) (*RangeScanResponse, error)
+	PrefixScan(context.Context, *PrefixScanRequest) (*RangeScanResponse, error)
+	Query(context.Context, *QueryRequest) (*QueryResponse, error)
+	Cas(context.Context, *CasRequest) (*CasResponse, error)
+	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchEvent]) error
+	Sync(*SyncRequest, grpc.ServerStreamingServer[SyncPayload]) error
 	mustEmbedUnimplementedKindServiceServer()
 }
 
@@ -112,6 +195,21 @@ func (UnimplementedKindServiceServer) Delete(context.Context, *DeleteRequest) (*
 }
 func (UnimplementedKindServiceServer) RangeScan(context.Context, *RangeScanRequest) (*RangeScanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RangeScan not implemented")
+}
+func (UnimplementedKindServiceServer) PrefixScan(context.Context, *PrefixScanRequest) (*RangeScanResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PrefixScan not implemented")
+}
+func (UnimplementedKindServiceServer) Query(context.Context, *QueryRequest) (*QueryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Query not implemented")
+}
+func (UnimplementedKindServiceServer) Cas(context.Context, *CasRequest) (*CasResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Cas not implemented")
+}
+func (UnimplementedKindServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchEvent]) error {
+	return status.Error(codes.Unimplemented, "method Watch not implemented")
+}
+func (UnimplementedKindServiceServer) Sync(*SyncRequest, grpc.ServerStreamingServer[SyncPayload]) error {
+	return status.Error(codes.Unimplemented, "method Sync not implemented")
 }
 func (UnimplementedKindServiceServer) mustEmbedUnimplementedKindServiceServer() {}
 func (UnimplementedKindServiceServer) testEmbeddedByValue()                     {}
@@ -206,6 +304,82 @@ func _KindService_RangeScan_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KindService_PrefixScan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrefixScanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KindServiceServer).PrefixScan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KindService_PrefixScan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KindServiceServer).PrefixScan(ctx, req.(*PrefixScanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KindService_Query_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KindServiceServer).Query(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KindService_Query_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KindServiceServer).Query(ctx, req.(*QueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KindService_Cas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KindServiceServer).Cas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KindService_Cas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KindServiceServer).Cas(ctx, req.(*CasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KindService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(KindServiceServer).Watch(m, &grpc.GenericServerStream[WatchRequest, WatchEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KindService_WatchServer = grpc.ServerStreamingServer[WatchEvent]
+
+func _KindService_Sync_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SyncRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(KindServiceServer).Sync(m, &grpc.GenericServerStream[SyncRequest, SyncPayload]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KindService_SyncServer = grpc.ServerStreamingServer[SyncPayload]
+
 // KindService_ServiceDesc is the grpc.ServiceDesc for KindService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -229,7 +403,30 @@ var KindService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "RangeScan",
 			Handler:    _KindService_RangeScan_Handler,
 		},
+		{
+			MethodName: "PrefixScan",
+			Handler:    _KindService_PrefixScan_Handler,
+		},
+		{
+			MethodName: "Query",
+			Handler:    _KindService_Query_Handler,
+		},
+		{
+			MethodName: "Cas",
+			Handler:    _KindService_Cas_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/kind.proto",
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Watch",
+			Handler:       _KindService_Watch_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Sync",
+			Handler:       _KindService_Sync_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "kind.proto",
 }

@@ -235,11 +235,28 @@ Kind DB uses gRPC and Protocol Buffers. Any language that supports gRPC can conn
 ```go
 import "github.com/NKS01X/Kind/go-client"
 
-client, err := kindclient.NewClient("localhost:50051")
+client, err := kindclient.NewKindClient("localhost:50051")
 if err != nil {
     panic(err)
 }
 defer client.Close()
+
+// 1. Basic put/get
+client.Put(ctx, "user:1", []byte(`{"name":"Alice"}`))
+record, _ := client.Get(ctx, "user:1")
+
+// 2. Realtime Watch Stream
+stream, _ := client.Watch(ctx, "user:")
+for {
+    event, _ := stream.Recv() // Block until a watched key changes
+    fmt.Println("Changed:", event.Key, event.OperationType)
+}
+
+// 3. Atomic Compare-And-Swap (Distributed lock)
+success, _ := client.CAS(ctx, "lock", []byte(""), []byte("owner"), 5000)
+
+// 4. Secondary Index Query
+records, _ := client.Query(ctx, "User", map[string]interface{}{"status": "Active"})
 ```
 
 ### Python (Generated Client)

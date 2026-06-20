@@ -45,11 +45,11 @@ fn server_with_schema() -> KindServerImpl {
     "#;
     let tmp = std::env::temp_dir().join("kind_bench_schema.ksl");
     std::fs::write(&tmp, ksl).unwrap();
-    KindServerImpl::new(None, Some(tmp.to_str().unwrap().to_string()), None)
+    KindServerImpl::new(None, Some(tmp.to_str().unwrap().to_string()), None, false)
 }
 
 fn bare_server() -> KindServerImpl {
-    KindServerImpl::new(None, None, None)
+    KindServerImpl::new(None, None, None, false)
 }
 
 fn container_json(id: usize, status: &str) -> Vec<u8> {
@@ -307,13 +307,13 @@ fn bench_cache_hit_vs_miss(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("cache_hit", n), &n, |b, &n| {
             b.iter_batched(
                 || {
-                    let mut cache = LruCache::new(n);
+                    let cache = LruCache::new(n);
                     for i in 0..n {
                         cache.put(format!("key:{:08}", i), vec![0u8; 64]);
                     }
                     cache
                 },
-                |mut cache| {
+                |cache| {
                     let mut rng = rand::thread_rng();
                     for _ in 0..1_000 {
                         let idx = rng.gen_range(0..n);
@@ -372,7 +372,7 @@ fn bench_cache_strategies(c: &mut Criterion) {
     group.bench_function("LRU", |b| {
         b.iter_batched(
             || (LruCache::<String, Vec<u8>>::new(capacity), build_workload()),
-            |(mut cache, workload)| {
+            |(cache, workload)| {
                 for idx in workload {
                     let key = format!("k:{}", idx);
                     if cache.get(&key).is_none() {
@@ -387,7 +387,7 @@ fn bench_cache_strategies(c: &mut Criterion) {
     group.bench_function("LFU", |b| {
         b.iter_batched(
             || (LfuCache::<String, Vec<u8>>::new(capacity), build_workload()),
-            |(mut cache, workload)| {
+            |(cache, workload)| {
                 for idx in workload {
                     let key = format!("k:{}", idx);
                     if cache.get(&key).is_none() {
@@ -402,7 +402,7 @@ fn bench_cache_strategies(c: &mut Criterion) {
     group.bench_function("FIFO", |b| {
         b.iter_batched(
             || (FifoCache::<String, Vec<u8>>::new(capacity), build_workload()),
-            |(mut cache, workload)| {
+            |(cache, workload)| {
                 for idx in workload {
                     let key = format!("k:{}", idx);
                     if cache.get(&key).is_none() {
